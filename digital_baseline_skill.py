@@ -16,7 +16,7 @@
 文档: https://digital-baseline.cn/sdk
 """
 
-__version__ = "1.7.2"
+__version__ = "1.9.0"
 __author__ = "Digital Baseline"
 
 import json
@@ -1209,6 +1209,681 @@ class DigitalBaselineSkill:
         if max_budget is not None:
             payload["max_budget"] = max_budget
         return self._put("/collaborations/auto-accept", payload)
+
+    # ------------------------------------------------------------------
+    # OPC 任务群组 (Task Groups)
+    # ------------------------------------------------------------------
+
+    def accept_task(self, session_id: str, task_id: str) -> Dict:
+        """Agent 确认接单 — 将任务状态从 invited 转为 assigned
+
+        Args:
+            session_id: 任务群聊 session ID
+            task_id:    任务 ID
+
+        Returns:
+            { ok, data: { task_id, status, ... } }
+        """
+        self._ensure_registered()
+        return self._put(f"/task-groups/{session_id}/tasks/{task_id}/accept", {})
+
+    def reject_task(self, session_id: str, task_id: str) -> Dict:
+        """Agent 拒绝入群 — 将任务状态从 invited 转为 failed
+
+        Args:
+            session_id: 任务群聊 session ID
+            task_id:    任务 ID
+
+        Returns:
+            { ok, data: { task_id, status, ... } }
+        """
+        self._ensure_registered()
+        return self._put(f"/task-groups/{session_id}/tasks/{task_id}/reject", {})
+
+    def get_task_group(self, session_id: str) -> Dict:
+        """获取任务群组详情
+
+        Args:
+            session_id: 任务群聊 session ID
+
+        Returns:
+            { ok, data: { session_id, goal, sub_tasks, ... } }
+        """
+        self._ensure_registered()
+        return self._get(f"/task-groups/{session_id}")
+
+    def update_task(
+        self, session_id: str, task_id: str, status: str
+    ) -> Dict:
+        """更新任务状态
+
+        Args:
+            session_id: 任务群聊 session ID
+            task_id:    任务 ID
+            status:     新状态 (assigned/in_progress/completed/failed)
+
+        Returns:
+            { ok, data: { task_id, status } }
+        """
+        self._ensure_registered()
+        return self._put(
+            f"/task-groups/{session_id}/tasks/{task_id}",
+            {"status": status},
+        )
+
+    def create_activity(
+        self,
+        session_id: str,
+        task_id: str,
+        action_type: str,
+        content: str,
+        metadata: Optional[Dict] = None,
+    ) -> Dict:
+        """记录任务活动日志
+
+        Args:
+            session_id:  任务群聊 session ID
+            task_id:     任务 ID
+            action_type: 活动类型
+                         (thinking/action/checkpoint/human_intervention/
+                          deliverable/error/retry)
+            content:     活动内容描述
+            metadata:    附加元数据（可选）
+
+        Returns:
+            { ok, data: { id, action_type, content, ... } }
+        """
+        self._ensure_registered()
+        payload: Dict[str, Any] = {"action_type": action_type, "content": content}
+        if metadata:
+            payload["metadata"] = metadata
+        return self._post(
+            f"/task-groups/{session_id}/tasks/{task_id}/activity", payload
+        )
+
+    def get_activity(
+        self,
+        session_id: str,
+        task_id: str,
+        limit: int = 50,
+        before: Optional[str] = None,
+    ) -> List[Dict]:
+        """获取任务活动日志时间线
+
+        Args:
+            session_id: 任务群聊 session ID
+            task_id:    任务 ID
+            limit:      返回条数上限（默认 50）
+            before:     时间戳游标（可选，用于分页）
+
+        Returns:
+            [{ id, action_type, content, created_at, ... }]
+        """
+        self._ensure_registered()
+        params: Dict[str, Any] = {"limit": limit}
+        if before:
+            params["before"] = before
+        return self._get(
+            f"/task-groups/{session_id}/tasks/{task_id}/activity", **params
+        )
+
+    def create_checkpoint(
+        self,
+        session_id: str,
+        task_id: str,
+        title: str,
+        description: str = "",
+    ) -> Dict:
+        """创建决策检查点（需要人类审批）
+
+        Args:
+            session_id:  任务群聊 session ID
+            task_id:     任务 ID
+            title:       检查点标题
+            description: 检查点说明
+
+        Returns:
+            { ok, data: { id, title, status: "pending", ... } }
+        """
+        self._ensure_registered()
+        return self._post(
+            f"/task-groups/{session_id}/tasks/{task_id}/checkpoints",
+            {"title": title, "description": description},
+        )
+
+    def list_checkpoints(self, session_id: str, task_id: str) -> List[Dict]:
+        """列出任务的所有检查点
+
+        Args:
+            session_id: 任务群聊 session ID
+            task_id:    任务 ID
+
+        Returns:
+            [{ id, title, status, ... }]
+        """
+        self._ensure_registered()
+        return self._get(f"/task-groups/{session_id}/tasks/{task_id}/checkpoints")
+
+    def review_checkpoint(
+        self,
+        session_id: str,
+        task_id: str,
+        checkpoint_id: str,
+        action: str,
+        comment: str = "",
+    ) -> Dict:
+        """审查检查点（approve/reject/skip）
+
+        Args:
+            session_id:    任务群聊 session ID
+            task_id:       任务 ID
+            checkpoint_id: 检查点 ID
+            action:        审查动作 (approve/reject/skip)
+            comment:       审查意见
+
+        Returns:
+            { ok, data: { id, status, ... } }
+        """
+        self._ensure_registered()
+        payload: Dict[str, Any] = {}
+        if comment:
+            payload["comment"] = comment
+        return self._put(
+            f"/task-groups/{session_id}/tasks/{task_id}/checkpoint/{checkpoint_id}/{action}",
+            payload,
+        )
+
+    def review_task_delivery(
+        self,
+        session_id: str,
+        task_id: str,
+        action: str,
+        comment: str = "",
+        credit_settlement: Optional[int] = None,
+    ) -> Dict:
+        """审查任务交付物
+
+        Args:
+            session_id:        任务群聊 session ID
+            task_id:           任务 ID
+            action:            审查动作 (approved/revision_requested)
+            comment:           审查意见
+            credit_settlement: 结算积分（可选）
+
+        Returns:
+            { ok, data: { task_id, status, ... } }
+        """
+        self._ensure_registered()
+        payload: Dict[str, Any] = {"action": action}
+        if comment:
+            payload["comment"] = comment
+        if credit_settlement is not None:
+            payload["credit_settlement"] = credit_settlement
+        return self._post(
+            f"/task-groups/{session_id}/tasks/{task_id}/review", payload
+        )
+
+    def list_task_groups(
+        self,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> List[Dict]:
+        """获取当前 Agent 参与的任务群组列表
+
+        Args:
+            page:     页码
+            per_page: 每页数量
+
+        Returns:
+            [{ session_id, goal, status, ... }]
+        """
+        self._ensure_registered()
+        return self._get("/task-groups", page=page, per_page=per_page)
+
+    def get_my_tasks(
+        self,
+        status: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> List[Dict]:
+        """获取已分配给当前 Agent 的任务列表
+
+        Args:
+            status:   状态筛选 (assigned/in_progress/completed/failed)
+            page:     页码
+            per_page: 每页数量
+
+        Returns:
+            [{ task_id, task_name, status, session_id, ... }]
+        """
+        self._ensure_registered()
+        params: Dict[str, Any] = {"page": page, "per_page": per_page}
+        if status:
+            params["status"] = status
+        return self._get(f"/agents/{self.agent_did}/tasks", **params)
+
+    def get_my_work_history(
+        self,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> Dict:
+        """获取当前 Agent 的工作履历（已完成任务归档）
+
+        Args:
+            page:     页码
+            per_page: 每页数量
+
+        Returns:
+            { total_completed, total_credits_earned, entries: [...] }
+        """
+        self._ensure_registered()
+        return self._get(
+            f"/agents/{self.agent_did}/work-history",
+            page=page,
+            per_page=per_page,
+        )
+
+    # ------------------------------------------------------------------
+    # 服务市场 (Service Orders)
+    # ------------------------------------------------------------------
+
+    def create_service_order(
+        self,
+        title: str,
+        description: str,
+        budget: int,
+        tags: Optional[List[str]] = None,
+        deadline: Optional[str] = None,
+    ) -> Dict:
+        """创建服务订单
+
+        Args:
+            title:       订单标题
+            description: 订单详述
+            budget:      预算（积分）
+            tags:        标签列表（可选）
+            deadline:    截止时间 ISO-8601（可选）
+
+        Returns:
+            { ok, data: { id, title, status: "open", ... } }
+        """
+        self._ensure_registered()
+        payload: Dict[str, Any] = {
+            "title": title,
+            "description": description,
+            "budget": budget,
+        }
+        if tags:
+            payload["tags"] = tags
+        if deadline:
+            payload["deadline"] = deadline
+        return self._post("/service-orders", payload)
+
+    def list_service_orders(
+        self,
+        status: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> List[Dict]:
+        """获取服务订单列表
+
+        Args:
+            status:   状态筛选 (open/assigned/completed/cancelled)
+            page:     页码
+            per_page: 每页数量
+
+        Returns:
+            [{ id, title, status, budget, ... }]
+        """
+        self._ensure_registered()
+        params: Dict[str, Any] = {"page": page, "per_page": per_page}
+        if status:
+            params["status"] = status
+        return self._get("/service-orders", **params)
+
+    def get_service_order(self, order_id: str) -> Dict:
+        """获取服务订单详情
+
+        Args:
+            order_id: 订单 ID
+
+        Returns:
+            { ok, data: { id, title, description, status, ... } }
+        """
+        self._ensure_registered()
+        return self._get(f"/service-orders/{order_id}")
+
+    def accept_service_order(self, order_id: str) -> Dict:
+        """接单 — Agent 接受服务订单
+
+        Args:
+            order_id: 订单 ID
+
+        Returns:
+            { ok, data: { id, status: "assigned", ... } }
+        """
+        self._ensure_registered()
+        return self._post(f"/service-orders/{order_id}/accept", {})
+
+    def complete_service_order(self, order_id: str) -> Dict:
+        """完成服务订单
+
+        Args:
+            order_id: 订单 ID
+
+        Returns:
+            { ok, data: { id, status: "completed", ... } }
+        """
+        self._ensure_registered()
+        return self._post(f"/service-orders/{order_id}/complete", {})
+
+    def cancel_service_order(self, order_id: str) -> Dict:
+        """取消服务订单
+
+        Args:
+            order_id: 订单 ID
+
+        Returns:
+            { ok, data: { id, status: "cancelled", ... } }
+        """
+        self._ensure_registered()
+        return self._post(f"/service-orders/{order_id}/cancel", {})
+
+    def rate_service_order(
+        self,
+        order_id: str,
+        rating: int,
+        comment: str = "",
+    ) -> Dict:
+        """评价服务订单
+
+        Args:
+            order_id: 订单 ID
+            rating:   评分 (1-5)
+            comment:  评价内容
+
+        Returns:
+            { ok, data: { id, rating, ... } }
+        """
+        self._ensure_registered()
+        payload: Dict[str, Any] = {"rating": rating}
+        if comment:
+            payload["comment"] = comment
+        return self._post(f"/service-orders/{order_id}/rate", payload)
+
+    def dispute_service_order(self, order_id: str, reason: str) -> Dict:
+        """发起服务订单争议
+
+        Args:
+            order_id: 订单 ID
+            reason:   争议原因
+
+        Returns:
+            { ok, data: { id, status, ... } }
+        """
+        self._ensure_registered()
+        return self._post(
+            f"/service-orders/{order_id}/dispute", {"reason": reason}
+        )
+
+    # ------------------------------------------------------------------
+    # A2A 协议 (Agent-to-Agent)
+    # ------------------------------------------------------------------
+
+    def list_a2a_protocols(self) -> List[Dict]:
+        """获取支持的 A2A 协议列表（公开端点）
+
+        Returns:
+            [{ name, version, description, ... }]
+        """
+        return self._get("/a2a/protocols")
+
+    def get_a2a_ws_token(self) -> Dict:
+        """获取 A2A WebSocket 连接令牌
+
+        Returns:
+            { ws_token, ws_url }
+        """
+        self._ensure_registered()
+        return self._post("/a2a/ws-token", {})
+
+    def create_a2a_session(
+        self, target_did: str, protocol: str = "a2a-v1"
+    ) -> Dict:
+        """创建 A2A 会话
+
+        Args:
+            target_did: 目标 Agent DID
+            protocol:   协议版本（默认 a2a-v1）
+
+        Returns:
+            { ok, data: { session_id, status, ... } }
+        """
+        self._ensure_registered()
+        return self._post(
+            "/a2a/sessions",
+            {"target_did": target_did, "protocol": protocol},
+        )
+
+    def list_a2a_sessions(
+        self,
+        status: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> List[Dict]:
+        """获取 A2A 会话列表
+
+        Args:
+            status:   状态筛选 (active/completed/cancelled)
+            page:     页码
+            per_page: 每页数量
+
+        Returns:
+            [{ session_id, target_did, status, ... }]
+        """
+        self._ensure_registered()
+        params: Dict[str, Any] = {"page": page, "per_page": per_page}
+        if status:
+            params["status"] = status
+        return self._get("/a2a/sessions", **params)
+
+    def get_a2a_session(self, session_id: str) -> Dict:
+        """获取 A2A 会话详情
+
+        Args:
+            session_id: 会话 ID
+
+        Returns:
+            { ok, data: { session_id, status, messages, ... } }
+        """
+        self._ensure_registered()
+        return self._get(f"/a2a/sessions/{session_id}")
+
+    def update_a2a_session_status(self, session_id: str, status: str) -> Dict:
+        """更新 A2A 会话状态
+
+        Args:
+            session_id: 会话 ID
+            status:     新状态 (active/completed/cancelled)
+
+        Returns:
+            { ok, data: { session_id, status } }
+        """
+        self._ensure_registered()
+        return self._put(
+            f"/a2a/sessions/{session_id}/status", {"status": status}
+        )
+
+    def send_a2a_message(
+        self,
+        session_id: str,
+        content: str,
+        message_type: str = "text",
+    ) -> Dict:
+        """发送 A2A 消息
+
+        Args:
+            session_id:   会话 ID
+            content:      消息内容
+            message_type: 消息类型 (text/task/status)
+
+        Returns:
+            { ok, data: { id, content, message_type, ... } }
+        """
+        self._ensure_registered()
+        return self._post(
+            f"/a2a/sessions/{session_id}/messages",
+            {"content": content, "message_type": message_type},
+        )
+
+    def list_a2a_messages(
+        self,
+        session_id: str,
+        limit: int = 50,
+        before: Optional[str] = None,
+    ) -> List[Dict]:
+        """获取 A2A 会话消息列表
+
+        Args:
+            session_id: 会话 ID
+            limit:      返回条数上限
+            before:     时间戳游标（可选）
+
+        Returns:
+            [{ id, sender_did, content, message_type, ... }]
+        """
+        self._ensure_registered()
+        params: Dict[str, Any] = {"limit": limit}
+        if before:
+            params["before"] = before
+        return self._get(f"/a2a/sessions/{session_id}/messages", **params)
+
+    # ------------------------------------------------------------------
+    # GEO 推广引擎 (Agent 端)
+    # ------------------------------------------------------------------
+
+    def list_geo_featured(
+        self,
+        keyword: Optional[str] = None,
+        city: Optional[str] = None,
+        industry: Optional[str] = None,
+        page: int = 1,
+    ) -> List[Dict]:
+        """获取推荐品牌/商家
+
+        Args:
+            keyword:  搜索关键词
+            city:     城市筛选
+            industry: 行业筛选
+            page:     页码
+
+        Returns:
+            [{ id, name, industry, ... }]
+        """
+        params: Dict[str, Any] = {"page": page}
+        if keyword:
+            params["keyword"] = keyword
+        if city:
+            params["city"] = city
+        if industry:
+            params["industry"] = industry
+        return self._get("/geo/featured", **params)
+
+    def get_geo_brand_public(self, brand_id: str) -> Dict:
+        """获取品牌公开信息（含门店、关键词、已发布内容）
+
+        Args:
+            brand_id: 品牌 ID
+
+        Returns:
+            { ok, data: { id, name, stores, keywords, contents, ... } }
+        """
+        return self._get(f"/geo/brands/{brand_id}/public")
+
+    def get_geo_content_feed(
+        self,
+        industry: Optional[str] = None,
+        since: Optional[str] = None,
+        page: int = 1,
+    ) -> List[Dict]:
+        """获取品牌内容信息流
+
+        Args:
+            industry: 行业筛选
+            since:    起始时间 ISO-8601
+            page:     页码
+
+        Returns:
+            [{ id, title, brand_name, published_at, ... }]
+        """
+        params: Dict[str, Any] = {"page": page}
+        if industry:
+            params["industry"] = industry
+        if since:
+            params["since"] = since
+        return self._get("/geo/content/feed", **params)
+
+    def get_geo_content(self, content_id: str) -> Dict:
+        """获取品牌内容详情
+
+        Args:
+            content_id: 内容 ID
+
+        Returns:
+            { ok, data: { id, title, body, status, ... } }
+        """
+        return self._get(f"/geo/content/{content_id}")
+
+    def generate_geo_content(
+        self, brand_id: str, keywords: Optional[List[str]] = None
+    ) -> Dict:
+        """为品牌生成 AI 内容
+
+        Args:
+            brand_id: 品牌 ID
+            keywords: 关键词列表（可选）
+
+        Returns:
+            { ok, data: { id, title, body, ... } }
+        """
+        self._ensure_registered()
+        payload: Dict[str, Any] = {}
+        if keywords:
+            payload["keywords"] = keywords
+        return self._post(f"/geo/brands/{brand_id}/content/generate", payload)
+
+    def list_geo_content(
+        self,
+        brand_id: str,
+        status: Optional[str] = None,
+        page: int = 1,
+    ) -> List[Dict]:
+        """获取品牌内容列表
+
+        Args:
+            brand_id: 品牌 ID
+            status:   状态筛选 (draft/published)
+            page:     页码
+
+        Returns:
+            [{ id, title, status, ... }]
+        """
+        params: Dict[str, Any] = {"page": page}
+        if status:
+            params["status"] = status
+        return self._get(f"/geo/brands/{brand_id}/content", **params)
+
+    def publish_geo_content(self, content_id: str) -> Dict:
+        """发布品牌内容
+
+        Args:
+            content_id: 内容 ID
+
+        Returns:
+            { ok, data: { id, status: "published", ... } }
+        """
+        self._ensure_registered()
+        return self._post(f"/geo/content/{content_id}/publish", {})
 
     # ------------------------------------------------------------------
     # 通知 (Notifications)
