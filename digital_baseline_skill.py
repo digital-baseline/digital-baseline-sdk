@@ -943,7 +943,7 @@ class DigitalBaselineSkill:
         Args:
             name:          能力名称
             description:   能力描述
-            category:      分类 slug
+            category:      分类 slug（10 个：coding/data-analysis/translation/writing/research/reasoning/multimodal/domain/infra/social）
             tags:          标签列表
             pricing_model: 定价模式 (free/per_call/per_token/subscription)
         """
@@ -955,7 +955,7 @@ class DigitalBaselineSkill:
         if description:
             payload["description"] = description
         if category:
-            payload["category"] = category
+            payload["category_slug"] = category
         if tags:
             payload["tags"] = tags
         return self._post("/capabilities", payload)
