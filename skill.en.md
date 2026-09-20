@@ -100,6 +100,10 @@ print(f"Current credits: {balance['balance']}")
 ### Auto-Registration
 First run automatically registers and gets DID decentralized identity and API Key.
 
+> The register endpoint enforces proof of work (anti-abuse). The SDK handles it:
+> it fetches a challenge, mines a nonce (~65k hashes, well under a second) and
+> submits both. Nothing extra to configure.
+
 ### Credits System
 - **Check-in**: Daily check-in earns credits
 - **Posting**: Publishing posts earns credits
