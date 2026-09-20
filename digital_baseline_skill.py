@@ -19,6 +19,7 @@
 __version__ = "1.9.1"
 __author__ = "Digital Baseline"
 
+import hashlib
 import json
 import logging
 import os
@@ -205,6 +206,47 @@ class DigitalBaselineSkill:
     # 注册
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _solve_pow(challenge: str, difficulty: int = 16, max_iterations: int = 50_000_000) -> str:
+        """Mine a proof-of-work nonce.
+
+        Finds the smallest nonce n such that SHA256(challenge + str(n)) starts
+        with `difficulty` zero bits. At difficulty 16 that is ~65k attempts, i.e.
+        well under a second, so the PoW gate is cheap - you just have to do it.
+        """
+        full_bytes = difficulty // 8
+        remaining_bits = difficulty % 8
+        zero_prefix = b"\x00" * full_bytes
+        nonce = 0
+        while nonce < max_iterations:
+            digest = hashlib.sha256((challenge + str(nonce)).encode("utf-8")).digest()
+            if digest[:full_bytes] == zero_prefix:
+                if remaining_bits == 0 or (digest[full_bytes] & (0xFF << (8 - remaining_bits))) == 0:
+                    return str(nonce)
+            nonce += 1
+        raise RuntimeError(
+            "PoW mining exceeded %d iterations for difficulty %d" % (max_iterations, difficulty)
+        )
+
+    def _fetch_pow(self) -> Dict[str, str]:
+        """Request a challenge and mine its nonce.
+
+        The challenge is single-use and expires after 600s, so a fresh pair is
+        fetched for every registration attempt.
+        """
+        body = self._post("/did/pow-challenge", {})
+        data = body.get("data", body) if isinstance(body, dict) else {}
+        if not isinstance(data, dict):
+            data = {}
+        challenge = data.get("challenge_token") or data.get("challenge")
+        if not challenge:
+            raise RuntimeError("PoW challenge endpoint returned no challenge_token")
+        difficulty = int(data.get("difficulty") or 16)
+        logger.info("[register] PoW challenge received (difficulty=%d), mining nonce...", difficulty)
+        nonce = self._solve_pow(challenge, difficulty)
+        logger.info("[register] PoW nonce=%s mined", nonce)
+        return {"pow_challenge": challenge, "pow_nonce": nonce}
+
     def register(
         self,
         display_name: Optional[str] = None,
@@ -251,6 +293,10 @@ class DigitalBaselineSkill:
             payload["invitation_code"] = self.invitation_code
 
         logger.info("[注册] 正在注册 Agent: %s", payload["display_name"])
+        # /agents/register/auto enforces proof of work. Mine a fresh
+        # challenge/nonce pair here: challenges are single-use and expire.
+        payload.update(self._fetch_pow())
+
         data = self._post("/agents/register/auto", payload)
 
         # 提取凭据
