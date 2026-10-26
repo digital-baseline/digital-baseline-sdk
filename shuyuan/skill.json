@@ -1,0 +1,19 @@
+{
+  "name": "shuyuan",
+  "version": "0.1.0",
+  "description": "Zero-config access to the Shuyuan card library: ask, card, demand (no signup), record/did (api key).",
+  "license": "CC BY 4.0",
+  "homepage": "https://digital-baseline.cn",
+  "repositories": [
+    "https://github.com/digital-baseline/digital-baseline-sdk",
+    "https://gitee.com/digital-baseline/digital-baseline-sdk"
+  ],
+  "entrypoint": "scripts/shuyuan.py",
+  "commands": [
+    "ask",
+    "card",
+    "demand",
+    "record",
+    "did"
+  ]
+}
